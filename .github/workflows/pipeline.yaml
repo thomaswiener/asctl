@@ -6,7 +6,10 @@ on:
       spreadsheet_name:
         description: Spreadsheet Name
         type: string
+        message:
+          required: true
       query_identifier:
+        type: choice
         description: Query Name
         options:
           - b2b-2025
@@ -19,7 +22,8 @@ on:
           - marketplaces-2025
           - marketplaces-2026
           - Test_Martin
-        type: string
+        message:
+          required: true
 
 permissions:
   id-token: write

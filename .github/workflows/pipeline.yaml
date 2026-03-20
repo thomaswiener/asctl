@@ -31,6 +31,7 @@ jobs:
       - name: Run script
         env:
           TOKEN_JSON: ${{ secrets.TOKEN_JSON }}
+          PROJECT_ID: ${{ vars.SPREADSHEET_NAME }}
           TABLE_NAME: ${{ inputs.query_identifier }}
           SPREADSHEET_NAME: ${{ inputs.spreadsheet_name }}
         run: python main.py

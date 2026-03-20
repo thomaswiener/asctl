@@ -1,0 +1,6 @@
+.env
+venv
+outputs/*.csv
+terraform/.terraform
+credentials.json
+token.json

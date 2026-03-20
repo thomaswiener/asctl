@@ -1,0 +1,332 @@
+#!/usr/bin/env python3
+
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+from google.auth.transport.requests import Request
+from google.cloud import secretmanager
+import argparse
+import base64
+import pickle
+import json
+import sys
+import os
+
+TOKEN_JSON = 'token.json'
+TOKEN = 'TOKEN'
+
+class Handler():
+    def authenticate(self):
+        creds = None
+
+        if os.getenv(TOKEN):
+            decoded = base64.b64decode(os.getenv(TOKEN)).decode()
+            with open(TOKEN_JSON, 'w') as f:
+                f.write(decoded)
+            creds = Credentials.from_authorized_user_file(TOKEN_JSON, self.get_scopes())
+
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            else:
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    'credentials.json',
+                    scopes=self.get_scopes()
+                )
+                creds = flow.run_local_server(port=0)
+
+                with open(TOKEN, 'w') as f:
+                    encoded = base64.b64encode(creds.to_json().encode()).decode()
+                    f.write(encoded)
+
+        #print(creds.valid)
+
+        return creds
+
+    def get_scopes(self):
+        return [
+            'https://www.googleapis.com/auth/script.projects',
+            'https://www.googleapis.com/auth/script.deployments',
+            'https://www.googleapis.com/auth/drive.file',
+            'https://www.googleapis.com/auth/spreadsheets',
+            'https://www.googleapis.com/auth/cloud-platform',
+        ]
+
+    def create_project(self, service, spreadsheet_id, title='script'):
+        """Create a new Apps Script project."""
+        project = service.projects().create(body={'title': title, 'parentId': spreadsheet_id}).execute()
+        script_id = project['scriptId']
+        print(f"Created project: {script_id}")
+        return script_id
+
+    def upload_script(self, service, script_id):
+        with open('app-scripts/Code.gs', 'rb') as f:
+            code = f.read().decode('utf-8')
+
+        code = self.replace_env(code)
+
+        """Upload .gs script files and the manifest to the project."""
+        files = [
+            {
+                'name': 'appsscript',        # manifest — must be named exactly this
+                'type': 'JSON',
+                'source': json.dumps({
+                    'timeZone': 'America/New_York',
+                    'exceptionLogging': 'STACKDRIVER',
+                    'runtimeVersion': 'V8',
+                    "oauthScopes": [
+                        "https://www.googleapis.com/auth/bigquery",                 # "view and manage your data in BigQuery"
+                        "https://www.googleapis.com/auth/spreadsheets",             # Google Sheets
+                        "https://www.googleapis.com/auth/script.external_request"   # "Connect to external service" (UrlFetchApp)
+                        # "https://www.googleapis.com/auth/bigquery.readonly",        # read-only alternative
+                        # "https://www.googleapis.com/auth/devstorage.read_only",     # Cloud Storage
+                    ],
+                    "dependencies": {
+                        "libraries": [
+                            {
+                                "userSymbol": "OAuth2",
+                                "libraryId": "1B7FSrk5Zi6L1rSxxTDgDEUsPzlukDsi4KGuTMorsTQHhGBzBkMun4iDF",
+                                "version": "43",
+                                "developmentMode": False
+                            }
+                        ],
+                        "enabledAdvancedServices": [
+                            {
+                                "userSymbol": "BigQuery",
+                                "serviceId": "bigquery",
+                                "version": "v2"
+                            }
+                        ]
+                    }
+                })
+            },
+            {
+                'name': 'Code',
+                'type': 'SERVER_JS',
+                'source': code
+            }
+        ]
+
+        service.projects().updateContent(
+            scriptId=script_id,
+            body={'files': files}
+        ).execute()
+        print("Script files uploaded.")
+
+    def create_version(self, service, script_id, description='v1'):
+        """Create a versioned snapshot of the project."""
+        version = service.projects().versions().create(
+            scriptId=script_id,
+            body={'description': description}
+        ).execute()
+        version_number = version['versionNumber']
+        print(f"Created version: {version_number}")
+        return version_number
+
+    def deploy(self, service, script_id, version_number):
+        """Deploy the script as an API executable."""
+        deployment = service.projects().deployments().create(
+            scriptId=script_id,
+            body={
+                'versionNumber': version_number,
+                'manifestFileName': 'appsscript',
+                'description': 'Deployed via Python'
+            }
+        ).execute()
+        deployment_id = deployment['deploymentId']
+        print(f"Deployment ID: {deployment_id}")
+        return deployment_id
+
+    def execute_function(self, service, script_id, function_name, parameters=None):
+        """Remotely execute a function in the deployed script."""
+        request = {
+            'function': function_name,
+            'parameters': parameters or [],
+            'devMode': True   # use latest saved version; set False for prod
+        }
+        response = service.scripts().run(
+            scriptId=script_id,
+            body=request
+        ).execute()
+
+        if 'error' in response:
+            raise RuntimeError(response['error']['details'])
+
+        return response.get('response', {}).get('result')
+
+    def replace_env(self, obj):
+        if isinstance(obj, dict):
+            return {k: self.replace_env(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self.replace_env(i) for i in obj]
+        elif isinstance(obj, str):
+            return os.path.expandvars(obj)
+        else:
+            return obj
+
+    def create_google_spreadsheet(self, sheets_service, title='My Spreadsheet'):
+        spreadsheet = sheets_service.spreadsheets().create(body={
+            'properties': {'title': title},
+            'sheets': [
+                {'properties': {'title': 'SQL_DWH'}},
+            ]
+        }).execute()
+
+        spreadsheet_id = spreadsheet['spreadsheetId']
+        url = spreadsheet['spreadsheetUrl']
+        print(f"Spreadsheet created: {url}")
+
+        return spreadsheet_id
+
+    def share_with_user(self, drive_service, file_id, email, role='writer'):
+        """
+        role:    'reader' | 'writer' | 'commenter' | 'owner'
+        """
+        permission = drive_service.permissions().create(
+            fileId=file_id,
+            sendNotificationEmail=True,
+            emailMessage='Here is your spreadsheet access.',
+            body={
+                'type': 'user',
+                'role': role,
+                'emailAddress': email
+            }
+        ).execute()
+
+        print(f"Shared with {email} as {role}. Permission ID: {permission['id']}")
+        return permission['id']
+
+    def read_secret(self, creds ,project_id, secret_id, version='latest'):
+        client = secretmanager.SecretManagerServiceClient(credentials=creds)
+
+        name = f"projects/{project_id}/secrets/{secret_id}/versions/{version}"
+        response = client.access_secret_version(request={"name": name})
+
+        return response.payload.data.decode("utf-8")
+
+    def create_spreadsheet(self, data):
+        name = data['name']
+
+        creds = self.authenticate()
+
+        drive_service = build('drive', 'v3', credentials=creds)
+        sheets_service = build('sheets', 'v4', credentials=creds)
+        script_service = build('script', 'v1', credentials=creds)
+
+        spreadsheet_id = self.create_google_spreadsheet(sheets_service, name)
+        private_key = self.read_secret(creds, os.getenv('PROJECT_ID'), 'APP_SCRIPT_SA_PRIVATE_KEY')
+
+        os.environ['PRIVATE_KEY'] = private_key
+        os.environ['SPREADSHEET_ID'] = spreadsheet_id
+        os.environ['TABLE_NAME'] = 'lb'
+
+        perm_id = self.share_with_user(drive_service, spreadsheet_id, 'martin.richter@kencana.de', role='writer')
+
+        # 1. Create project
+        script_id = self.create_project(script_service, spreadsheet_id)
+
+        # 2. Upload script code
+        self.upload_script(script_service, script_id)
+
+        # 3. Create a version
+        #version_number = create_version(service, script_id, description='Initial version')
+
+        # 4. Deploy
+        #deployment_id = deploy(service, script_id, version_number)
+
+        # 5. Execute a function remotely
+        #result = execute_function(service, script_id, 'addNumbers', [3, 7])
+        #print(f"Function result: {result}")   # → 10
+
+    def create_token(self, data):
+        creds = self.authenticate()
+
+        #print(creds.to_json())
+        print(base64.b64encode(creds.to_json().encode()).decode())
+
+
+class ArgsHandler(object):
+
+    def __init__(self, handler):
+        self.handler = handler
+        parser = argparse.ArgumentParser(
+            description='apps script control - asctl',
+            usage='''./asctl <command> [<args>]
+
+Commands are:
+   spreadsheet       Handles spreadsheet actions
+   appsscript        Handles appsscript actions
+   token             Handles invoice actions
+''')
+        parser.add_argument('command', help='Subcommand to run')
+        # parse_args defaults to [1:] for args, but you need to
+        # exclude the rest of the args too, or validation will fail
+        args = parser.parse_args(sys.argv[1:2])
+        if not hasattr(self, args.command):
+            print('Unrecognized command')
+            parser.print_help()
+            exit(1)
+        # use dispatch pattern to invoke method with same name
+        getattr(self, args.command)()
+
+    def spreadsheet(self):
+        parser = argparse.ArgumentParser(
+            description='Spreadsheet actions',
+            usage='''./asctl spreadsheet <command> [<args>]
+
+Commands are:
+   create     Creates a spreadsheet
+''')
+        # NOT prefixing the argument with -- means it's not optional
+        parser.add_argument('sub')
+        args = parser.parse_args(sys.argv[2:3])
+        attribute = f'spreadsheet_{args.sub.replace('-', '_')}'
+        if not hasattr(self, attribute):
+            print('Unrecognized command')
+            parser.print_help()
+            exit(1)
+        getattr(self, attribute)()
+
+    def spreadsheet_create(self):
+        parser = argparse.ArgumentParser(description='Creates an spreadsheet')
+        parser.add_argument("-n", "--name", required=True, help="Name of Spreadsheet", type=str)
+        args = parser.parse_args(sys.argv[3:])
+        self.handler.create_spreadsheet(vars(args))
+
+
+
+    def token(self):
+        parser = argparse.ArgumentParser(
+            description='Token actions',
+            usage='''./asctl token <command> [<args>]
+
+Commands are:
+   create     Creates a token
+''')
+        # NOT prefixing the argument with -- means it's not optional
+        parser.add_argument('sub')
+        args = parser.parse_args(sys.argv[2:3])
+        attribute = f'token_{args.sub.replace('-', '_')}'
+        if not hasattr(self, attribute):
+            print('Unrecognized command')
+            parser.print_help()
+            exit(1)
+        getattr(self, attribute)()
+
+    def token_create(self):
+        parser = argparse.ArgumentParser(description='Creates a token')
+        args = parser.parse_args(sys.argv[3:])
+        self.handler.create_token(vars(args))
+
+    #def token_renew(self):
+    #    parser = argparse.ArgumentParser(description='Renews a token')
+    #    args = parser.parse_args(sys.argv[3:])
+    #    self.handler.renew_token(vars(args))
+
+
+def main():
+    handler = Handler()
+    ArgsHandler(handler)
+
+if __name__ == '__main__':
+    main()

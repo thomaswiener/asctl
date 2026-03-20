@@ -7,7 +7,18 @@ on:
         description: Spreadsheet Name
         type: string
       query_identifier:
-        description: Query Filename (without extension) Example for `lb.csv` it is `lb`
+        description: Query Name
+        options:
+          - b2b-2025
+          - b2b-2026
+          - d2c-2025
+          - d2c-2026
+          - kore001-2025
+          - kore001-2026
+          - lb
+          - marketplaces-2025
+          - marketplaces-2026
+          - Test_Martin
         type: string
 
 permissions:

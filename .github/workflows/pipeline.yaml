@@ -19,9 +19,12 @@ jobs:
   trigger:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - name: Print env
+        run: env
+
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
 
@@ -31,7 +34,7 @@ jobs:
       - name: Run script
         env:
           TOKEN: ${{ secrets.TOKEN }}
-          PROJECT_ID: ${{ vars.SPREADSHEET_NAME }}
+          PROJECT_ID: ${{ vars.PROJECT_ID }}
           TABLE_NAME: ${{ inputs.query_identifier }}
           SPREADSHEET_NAME: ${{ inputs.spreadsheet_name }}
         run: ./asctl spreadsheet create

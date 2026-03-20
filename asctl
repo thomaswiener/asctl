@@ -217,8 +217,6 @@ class Handler():
         private_key = self.read_secret(creds, os.getenv('PROJECT_ID'), 'APP_SCRIPT_SA_PRIVATE_KEY')
 
         os.environ['PRIVATE_KEY'] = private_key
-        os.environ['SPREADSHEET_ID'] = spreadsheet_id
-        os.environ['TABLE_NAME'] = 'lb'
 
         perm_id = self.share_with_user(drive_service, spreadsheet_id, 'martin.richter@kencana.de', role='writer')
 

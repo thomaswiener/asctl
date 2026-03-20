@@ -249,6 +249,7 @@ class ArgsHandler(object):
 
     def __init__(self, handler):
         self.handler = handler
+
         parser = argparse.ArgumentParser(
             description='apps script control - asctl',
             usage='''./asctl <command> [<args>]
@@ -288,8 +289,10 @@ Commands are:
         getattr(self, attribute)()
 
     def spreadsheet_create(self):
+        spreadsheet_name = os.getenv("SPREADSHEET_NAME")
+
         parser = argparse.ArgumentParser(description='Creates an spreadsheet')
-        parser.add_argument("-n", "--name", required=True, help="Name of Spreadsheet", type=str)
+        parser.add_argument("-n", "--name", required=spreadsheet_name is None, default=spreadsheet_name, help="Name of Spreadsheet", type=str)
         args = parser.parse_args(sys.argv[3:])
         self.handler.create_spreadsheet(vars(args))
 

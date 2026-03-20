@@ -1,16 +1,18 @@
 name: Create spreadsheet and configure apps-script
 
 on:
+  schedule:
+    - cron: "0 4 * * *"
   workflow_dispatch:
     inputs:
       spreadsheet_name:
         description: Spreadsheet Name
         type: string
-        message:
-          required: true
+        required: true
       query_identifier:
         type: choice
         description: Query Name
+        required: true
         options:
           - b2b-2025
           - b2b-2026
@@ -22,8 +24,6 @@ on:
           - marketplaces-2025
           - marketplaces-2026
           - Test_Martin
-        message:
-          required: true
 
 permissions:
   id-token: write
@@ -47,9 +47,16 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run script
+        if: github.event_name == 'workflow_dispatch'
         env:
           TOKEN: ${{ secrets.TOKEN }}
           PROJECT_ID: ${{ vars.PROJECT_ID }}
           TABLE_NAME: ${{ inputs.query_identifier }}
           SPREADSHEET_NAME: ${{ inputs.spreadsheet_name }}
         run: ./asctl spreadsheet create
+
+      - name: Renew token
+        if: github.event_name == 'schedule'
+        env:
+          TOKEN: ${{ secrets.TOKEN }}
+        run: ./asctl token renew

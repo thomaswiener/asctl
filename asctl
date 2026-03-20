@@ -21,9 +21,8 @@ class Handler():
 
         if os.getenv(TOKEN):
             decoded = base64.b64decode(os.getenv(TOKEN)).decode()
-            with open(TOKEN_JSON, 'w') as f:
-                f.write(decoded)
-            creds = Credentials.from_authorized_user_file(TOKEN_JSON, self.get_scopes())
+            data = json.loads(decoded)
+            creds = Credentials.from_authorized_user_info(data, self.get_scopes())
 
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
@@ -237,11 +236,11 @@ class Handler():
         #result = execute_function(service, script_id, 'addNumbers', [3, 7])
         #print(f"Function result: {result}")   # → 10
 
-    def create_token(self, data):
+    def renew_token(self, data):
         creds = self.authenticate()
-
+        print(f"creds valid: {creds.valid}")
         #print(creds.to_json())
-        print(base64.b64encode(creds.to_json().encode()).decode())
+        #print(base64.b64encode(creds.to_json().encode()).decode())
 
 
 class ArgsHandler(object):
@@ -303,7 +302,7 @@ Commands are:
             usage='''./asctl token <command> [<args>]
 
 Commands are:
-   create     Creates a token
+   renew     Renew a token
 ''')
         # NOT prefixing the argument with -- means it's not optional
         parser.add_argument('sub')
@@ -315,10 +314,10 @@ Commands are:
             exit(1)
         getattr(self, attribute)()
 
-    def token_create(self):
+    def token_renew(self):
         parser = argparse.ArgumentParser(description='Creates a token')
         args = parser.parse_args(sys.argv[3:])
-        self.handler.create_token(vars(args))
+        self.handler.renew_token(vars(args))
 
     #def token_renew(self):
     #    parser = argparse.ArgumentParser(description='Renews a token')

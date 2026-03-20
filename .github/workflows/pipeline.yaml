@@ -34,4 +34,4 @@ jobs:
           PROJECT_ID: ${{ vars.SPREADSHEET_NAME }}
           TABLE_NAME: ${{ inputs.query_identifier }}
           SPREADSHEET_NAME: ${{ inputs.spreadsheet_name }}
-        run: python main.py
+        run: ./asctl spreadsheet create

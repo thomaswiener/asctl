@@ -1,8 +1,8 @@
 name: Create spreadsheet and configure apps-script
 
 on:
-  schedule:
-    - cron: "0 4 * * *"
+#  schedule:
+#    - cron: "0 4 * * *"
   workflow_dispatch:
     inputs:
       spreadsheet_name:
